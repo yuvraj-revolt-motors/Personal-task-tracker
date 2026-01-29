@@ -14,14 +14,28 @@ export default function HistoryPage() {
     const [expandedDate, setExpandedDate] = useState<string | null>(null);
 
     useEffect(() => {
-        Promise.all([
-            fetch('/api/history').then(r => r.json()),
-            fetch('/api/stats').then(r => r.json())
-        ]).then(([h, s]) => {
-            setHistory(h);
-            setStats(s);
+        async function loadData() {
+            try {
+                const hRes = await fetch('/api/history');
+                if (hRes.ok) {
+                    const h = await hRes.json();
+                    setHistory(h);
+                } else {
+                    console.error("History fetch failed", hRes.status);
+                }
+            } catch (e) { console.error(e); }
+
+            try {
+                const sRes = await fetch('/api/stats');
+                if (sRes.ok) {
+                    const s = await sRes.json();
+                    setStats(s);
+                }
+            } catch (e) { console.error(e); }
+
             setLoading(false);
-        });
+        }
+        loadData();
     }, []);
 
     if (loading) return <div className="flex h-screen items-center justify-center text-gray-400 animate-pulse bg-[#F0F4F8]">Loading...</div>;
@@ -52,10 +66,6 @@ export default function HistoryPage() {
                         <div>
                             <p className="text-gray-400 text-xs font-bold uppercase tracking-widest mb-1">Dev Days</p>
                             <p className="text-4xl font-extrabold">{stats?.dev_days || 0}</p>
-                        </div>
-                        <div>
-                            <p className="text-blue-400 text-xs font-bold uppercase tracking-widest mb-1">Total TLE</p>
-                            <p className="text-4xl font-extrabold text-blue-400">{stats?.total_tle || 0}m</p>
                         </div>
                     </div>
                 </div>
@@ -98,11 +108,6 @@ export default function HistoryPage() {
                                                     <span className="text-xs font-bold text-gray-600">{Math.round(progress)}%</span>
                                                 </div>
 
-                                                {day.tle_minutes > 0 && (
-                                                    <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded-md">
-                                                        TLE: {day.tle_minutes}m
-                                                    </span>
-                                                )}
                                             </div>
                                         </div>
 

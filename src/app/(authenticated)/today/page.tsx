@@ -205,14 +205,24 @@ export default function TodayPage() {
                 <div className="flex flex-col gap-2 justify-center">
                     <button
                         onClick={() => setIsWorkoutExpanded(!isWorkoutExpanded)}
-                        className={cn("bg-white border border-gray-200 hover:border-black hover:bg-gray-50 text-gray-600 font-bold px-5 py-3 rounded-2xl text-sm transition-all flex items-center gap-2", isWorkoutExpanded && "bg-black text-white border-black")}
+                        className={cn(
+                            "border font-bold px-5 py-3 rounded-2xl text-sm transition-all flex items-center gap-2",
+                            isWorkoutExpanded
+                                ? "bg-black text-white border-black hover:bg-gray-800"
+                                : "bg-white border-gray-200 text-gray-600 hover:border-black hover:bg-gray-50"
+                        )}
                     >
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
                         Workout
                     </button>
                     <button
                         onClick={() => setIsRulesExpanded(!isRulesExpanded)}
-                        className={cn("bg-white border border-gray-200 hover:border-black hover:bg-gray-50 text-gray-600 font-bold px-5 py-3 rounded-2xl text-sm transition-all flex items-center gap-2", isRulesExpanded && "bg-black text-white border-black")}
+                        className={cn(
+                            "border font-bold px-5 py-3 rounded-2xl text-sm transition-all flex items-center gap-2",
+                            isRulesExpanded
+                                ? "bg-black text-white border-black hover:bg-gray-800"
+                                : "bg-white border-gray-200 text-gray-600 hover:border-black hover:bg-gray-50"
+                        )}
                     >
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                         Principles
@@ -230,6 +240,7 @@ export default function TodayPage() {
             <AnimatePresence>
                 {isWorkoutExpanded && (
                     <motion.div
+                        key="workout-panel"
                         initial={{ height: 0, opacity: 0 }}
                         animate={{ height: 'auto', opacity: 1 }}
                         exit={{ height: 0, opacity: 0 }}
@@ -262,6 +273,7 @@ export default function TodayPage() {
                 )}
                 {isRulesExpanded && (
                     <motion.div
+                        key="rules-panel"
                         initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
                         className="overflow-hidden mb-8"
                     >
@@ -269,7 +281,7 @@ export default function TodayPage() {
                             <h4 className="text-xs font-black text-yellow-800 uppercase tracking-widest mb-4">Core Principles</h4>
                             <ul className="space-y-3 mb-6">
                                 {rules.map(r => (
-                                    <li key={r.id} className="text-sm font-bold text-gray-800 flex items-start gap-3 group">
+                                    <li key={r.id || `rule-${Math.random()}`} className="text-sm font-bold text-gray-800 flex items-start gap-3 group">
                                         <span className="text-yellow-500 mt-1">•</span>
                                         <span className="flex-1">{r.content}</span>
                                         <button onClick={() => handleDeleteRule(r.id)} className="text-gray-300 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity">×</button>
@@ -352,7 +364,7 @@ export default function TodayPage() {
                             placeholder="What went well? What didn't?"
                         />
                         <div className="mt-4 flex items-center gap-4">
-                            <SelectTime value={data?.tle_minutes || 0} onChange={v => saveSummary({ tle_minutes: v })} />
+                            {/* Removed TLE Minutes Input */}
                         </div>
                     </div>
 

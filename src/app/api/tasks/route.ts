@@ -1,28 +1,36 @@
-
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 
 // Create Task (Ad-hoc) OR Habit
 export async function POST(request: Request) {
     try {
-        const { date, title, priority, type, section_id } = await request.json(); // Added section_id
+        const { date, title, priority, type, section_id } = await request.json();
 
-        const db = getDb();
+        const db = await getDb();
 
         if (type === 'habit') {
-            const info = db.prepare('INSERT INTO habits (title, priority) VALUES (?, ?)').run(title, priority || 1);
+            const info = await db.execute({
+                sql: 'INSERT INTO habits (title, priority) VALUES (?, ?)',
+                args: [title, priority || 1]
+            });
             if (date) {
-                db.prepare('INSERT INTO tasks (date, title, priority, habit_id, completed) VALUES (?, ?, ?, ?, 0)')
-                    .run(date, title, priority || 1, info.lastInsertRowid);
+                await db.execute({
+                    sql: 'INSERT INTO tasks (date, title, priority, habit_id, completed) VALUES (?, ?, ?, ?, 0)',
+                    args: [date, title, priority || 1, info.lastInsertRowid]
+                });
             }
             return NextResponse.json({ success: true });
         } else {
             if (!date || !title) return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
-            const info = db.prepare('INSERT INTO tasks (date, title, priority, section_id, completed) VALUES (?, ?, ?, ?, 0)')
-                .run(date, title, priority || 1, section_id || null);
-            return NextResponse.json({ id: info.lastInsertRowid, date, title, priority: priority || 1, section_id, completed: 0 });
+            const info = await db.execute({
+                sql: 'INSERT INTO tasks (date, title, priority, section_id, completed) VALUES (?, ?, ?, ?, 0)',
+                args: [date, title, priority || 1, section_id || null]
+            });
+            // Convert BigInt to number/string for JSON serialization if needed, though simple ints are fine
+            return NextResponse.json({ id: info.lastInsertRowid.toString(), date, title, priority: priority || 1, section_id, completed: 0 });
         }
     } catch (e) {
+        console.error(e);
         return NextResponse.json({ error: 'Failed to create' }, { status: 500 });
     }
 }
@@ -33,7 +41,7 @@ export async function PATCH(request: Request) {
         const { id, completed, note, priority } = await request.json();
         if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
-        const db = getDb();
+        const db = await getDb();
 
         const updates = [];
         const params = [];
@@ -44,10 +52,16 @@ export async function PATCH(request: Request) {
 
         params.push(id);
 
-        db.prepare(`UPDATE tasks SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+        if (updates.length > 0) {
+            await db.execute({
+                sql: `UPDATE tasks SET ${updates.join(', ')} WHERE id = ?`,
+                args: params
+            });
+        }
 
         return NextResponse.json({ success: true });
     } catch (e) {
+        console.error(e);
         return NextResponse.json({ error: 'Failed to update' }, { status: 500 });
     }
 }
@@ -56,16 +70,17 @@ export async function PATCH(request: Request) {
 export async function DELETE(request: Request) {
     try {
         const { id, is_habit_template } = await request.json();
-        const db = getDb();
+        const db = await getDb();
 
         if (is_habit_template) {
-            db.prepare('UPDATE habits SET is_archived = 1 WHERE id = ?').run(id);
+            await db.execute({ sql: 'UPDATE habits SET is_archived = 1 WHERE id = ?', args: [id] });
         } else {
-            db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
+            await db.execute({ sql: 'DELETE FROM tasks WHERE id = ?', args: [id] });
         }
 
         return NextResponse.json({ success: true });
     } catch (e) {
+        console.error(e);
         return NextResponse.json({ error: 'Failed to delete' }, { status: 500 });
     }
 }
