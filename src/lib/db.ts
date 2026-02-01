@@ -16,20 +16,20 @@ let initPromise: Promise<void> | null = null;
 
 async function initDb() {
   try {
-    // 1. Create Tables
-    await client.execute(`CREATE TABLE IF NOT EXISTS sections (
+    // Optimization: Batch most table creations and basic migrations
+    // This reduces cross-region latency for each individual check.
+    const schemaStatements = [
+      `CREATE TABLE IF NOT EXISTS sections (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     title TEXT NOT NULL,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
-                )`);
-
-    await client.execute(`CREATE TABLE IF NOT EXISTS memory_rules (
+                )`,
+      `CREATE TABLE IF NOT EXISTS memory_rules (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     content TEXT NOT NULL,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
-                )`);
-
-    await client.execute(`CREATE TABLE IF NOT EXISTS habits (
+                )`,
+      `CREATE TABLE IF NOT EXISTS habits (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     title TEXT NOT NULL,
                     subtitle TEXT,
@@ -38,9 +38,8 @@ async function initDb() {
                     streak INTEGER DEFAULT 0,
                     track_streak INTEGER DEFAULT 0,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
-                )`);
-
-    await client.execute(`CREATE TABLE IF NOT EXISTS habit_logs (
+                )`,
+      `CREATE TABLE IF NOT EXISTS habit_logs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     habit_id INTEGER,
                     date TEXT,
@@ -48,39 +47,21 @@ async function initDb() {
                     time_spent INTEGER DEFAULT 0,
                     note TEXT,
                     FOREIGN KEY(habit_id) REFERENCES habits(id)
-                )`);
-
-    // Migration: Ensure habits table has new columns (Remote DB Fix)
-    try { await client.execute('ALTER TABLE habits ADD COLUMN subtitle TEXT'); } catch (e) { /* ignore */ }
-    try { await client.execute('ALTER TABLE habits ADD COLUMN icon TEXT'); } catch (e) { /* ignore */ }
-    try { await client.execute('ALTER TABLE habits ADD COLUMN color TEXT DEFAULT "purple"'); } catch (e) { /* ignore */ }
-    try { await client.execute('ALTER TABLE habits ADD COLUMN streak INTEGER DEFAULT 0'); } catch (e) { /* ignore */ }
-    try { await client.execute('ALTER TABLE habits ADD COLUMN track_streak INTEGER DEFAULT 0'); } catch (e) { /* ignore */ }
-
-    const habitsCount = await client.execute('SELECT COUNT(*) as count FROM habits');
-    if (habitsCount.rows[0].count === 0) {
-      await client.execute(`INSERT INTO habits (title, subtitle, icon, color) VALUES
-              ('DSA', 'Solve 1 Problem', '🧩', 'purple'),
-              ('Learning', 'Dev / Playwright', '💻', 'amber'),
-              ('Gym', 'Health & Fitness', '💪', 'red')`);
-    }
-
-    await client.execute(`CREATE TABLE IF NOT EXISTS daily_logs (
+                )`,
+      `CREATE TABLE IF NOT EXISTS daily_logs (
                     date TEXT PRIMARY KEY,
                     tle_minutes INTEGER DEFAULT 0,
                     note TEXT,
                     tomorrow_intent TEXT
-                )`);
-
-    await client.execute(`CREATE TABLE IF NOT EXISTS users (
+                )`,
+      `CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     email TEXT UNIQUE NOT NULL,
                     password TEXT NOT NULL,
                     name TEXT,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
-                )`);
-
-    await client.execute(`CREATE TABLE IF NOT EXISTS tasks (
+                )`,
+      `CREATE TABLE IF NOT EXISTS tasks (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     date TEXT NOT NULL,
                     title TEXT NOT NULL,
@@ -89,44 +70,70 @@ async function initDb() {
                     note TEXT,
                     habit_id INTEGER,
                     section_id INTEGER REFERENCES sections(id) ON DELETE SET NULL,
-                    estimated_time INTEGER, -- minutes
+                    estimated_time INTEGER,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
-                )`);
-
-    // 2. Migrations
-    try {
-      await client.execute(`ALTER TABLE tasks ADD COLUMN section_id INTEGER REFERENCES sections(id) ON DELETE SET NULL`);
-    } catch (e) { /* ignore */ }
-
-    try {
-      await client.execute(`ALTER TABLE tasks ADD COLUMN estimated_time INTEGER`);
-    } catch (e) { /* ignore */ }
-
-    try {
-      await client.execute(`ALTER TABLE tasks ADD COLUMN note TEXT`);
-    } catch (e) { /* ignore */ }
-
-    try {
-      await client.execute(`ALTER TABLE daily_logs ADD COLUMN tomorrow_intent TEXT`);
-    } catch (e) { /* ignore */ }
-
-    // Daily System Migrations
-    const systemCols = [
-      'dsa_done INTEGER DEFAULT 0',
-      'dev_done INTEGER DEFAULT 0',
-      'gym_done INTEGER DEFAULT 0',
-      'work_done INTEGER DEFAULT 0',
-      'secondary_work_mins INTEGER DEFAULT 0',
-      'focus_done INTEGER DEFAULT 0'
+                )`,
+      `CREATE TABLE IF NOT EXISTS workout_schedule (
+                    day_index INTEGER PRIMARY KEY, -- 0=Sun, 1=Mon...
+                    day_name TEXT NOT NULL,
+                    focus_area TEXT NOT NULL,
+                    exercises TEXT
+                )`,
+      `CREATE TABLE IF NOT EXISTS buying_list (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    item TEXT NOT NULL,
+                    category TEXT,
+                    completed INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )`,
+      `CREATE TABLE IF NOT EXISTS buying_categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )`
     ];
 
-    for (const col of systemCols) {
-      try {
-        await client.execute(`ALTER TABLE daily_logs ADD COLUMN ${col}`);
-      } catch (e) { /* ignore */ }
+    await client.batch(schemaStatements, "write");
+
+    // Sequential migrations (only if needed) - Wrap in try/catch individual for safety
+    const migrations = [
+      'ALTER TABLE habits ADD COLUMN subtitle TEXT',
+      'ALTER TABLE habits ADD COLUMN icon TEXT',
+      'ALTER TABLE habits ADD COLUMN color TEXT DEFAULT "purple"',
+      'ALTER TABLE habits ADD COLUMN streak INTEGER DEFAULT 0',
+      'ALTER TABLE habits ADD COLUMN track_streak INTEGER DEFAULT 0',
+      'ALTER TABLE tasks ADD COLUMN section_id INTEGER REFERENCES sections(id) ON DELETE SET NULL',
+      'ALTER TABLE tasks ADD COLUMN estimated_time INTEGER',
+      'ALTER TABLE tasks ADD COLUMN note TEXT',
+      'ALTER TABLE daily_logs ADD COLUMN tomorrow_intent TEXT',
+      'ALTER TABLE daily_logs ADD COLUMN dsa_done INTEGER DEFAULT 0',
+      'ALTER TABLE daily_logs ADD COLUMN dev_done INTEGER DEFAULT 0',
+      'ALTER TABLE daily_logs ADD COLUMN gym_done INTEGER DEFAULT 0',
+      'ALTER TABLE daily_logs ADD COLUMN work_done INTEGER DEFAULT 0',
+      'ALTER TABLE daily_logs ADD COLUMN secondary_work_mins INTEGER DEFAULT 0',
+      'ALTER TABLE daily_logs ADD COLUMN focus_done INTEGER DEFAULT 0',
+      'ALTER TABLE daily_logs ADD COLUMN dsa_time INTEGER DEFAULT 0',
+      'ALTER TABLE daily_logs ADD COLUMN dsa_note TEXT',
+      'ALTER TABLE daily_logs ADD COLUMN dev_time INTEGER DEFAULT 0',
+      'ALTER TABLE daily_logs ADD COLUMN dev_note TEXT',
+      'ALTER TABLE daily_logs ADD COLUMN gym_time INTEGER DEFAULT 0',
+      'ALTER TABLE daily_logs ADD COLUMN gym_note TEXT'
+    ];
+
+    // Running migrations in a single attempt to reduce RTT
+    for (const sql of migrations) {
+      try { await client.execute(sql); } catch (e) { /* Expected if col exists */ }
     }
 
-    // 3. Seed Defaults
+    // Seed defaults if empty (Check only once)
+    const habitsCount = await client.execute('SELECT COUNT(*) as count FROM habits');
+    if (habitsCount.rows[0].count === 0) {
+      await client.execute(`INSERT INTO habits (title, subtitle, icon, color) VALUES
+              ('DSA', 'Solve 1 Problem', '🧩', 'purple'),
+              ('Learning', 'Dev / Playwright', '💻', 'amber'),
+              ('Gym', 'Health & Fitness', '💪', 'red')`);
+    }
+
     const secCount = await client.execute('SELECT count(*) as c FROM sections');
     const countVal = secCount.rows[0];
 
@@ -147,46 +154,8 @@ async function initDb() {
       await client.execute({ sql: 'INSERT INTO memory_rules (content) VALUES (?)', args: ['Consistency > Intensity'] });
     }
 
-    // Workout Schedule Table
-    await client.execute(`CREATE TABLE IF NOT EXISTS workout_schedule (
-                    day_index INTEGER PRIMARY KEY, -- 0=Sun, 1=Mon...
-                    day_name TEXT NOT NULL,
-                    focus_area TEXT NOT NULL,
-                    exercises TEXT
-                )`);
-
-    // Migrations for Extended Daily Logs
-    const detailedCols = [
-      'dsa_time INTEGER DEFAULT 0', 'dsa_note TEXT',
-      'dev_time INTEGER DEFAULT 0', 'dev_note TEXT',
-      'gym_time INTEGER DEFAULT 0', 'gym_note TEXT'
-    ];
-
-    for (const col of detailedCols) {
-      try {
-        await client.execute(`ALTER TABLE daily_logs ADD COLUMN ${col}`);
-      } catch (e) { /* ignore */ }
-    }
-
-    // Buying List Table
-    await client.execute(`CREATE TABLE IF NOT EXISTS buying_list (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    item TEXT NOT NULL,
-                    category TEXT, -- e.g. 'Household', 'Bike', 'Coco'
-                    completed INTEGER DEFAULT 0,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-                )`);
-
-    // Buying Categories (Added for Dynamic Categories)
-    await client.execute(`CREATE TABLE IF NOT EXISTS buying_categories (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )`);
-
-    // Seed Categories
-    const catCount = await client.execute('SELECT COUNT(*) as c FROM buying_categories');
-    if (Number(catCount.rows[0].c) === 0) {
+    const catCheck = await client.execute('SELECT COUNT(*) as c FROM buying_categories');
+    if (Number(catCheck.rows[0].c) === 0) {
       const defaults = ['General', 'Coco 🐶', 'Bike 🏍️', 'Household 🏠', 'Health ❤️'];
       for (const d of defaults) {
         await client.execute({ sql: 'INSERT OR IGNORE INTO buying_categories (name) VALUES (?)', args: [d] });

@@ -79,23 +79,25 @@ export default function TodayPage() {
     // Fetchers
     const fetchData = useCallback(() => {
         setLoading(true);
-        Promise.all([
-            fetch(`/api/daily?date=${date}`).then(r => r.json()),
-            fetch(`/api/habits?date=${date}`).then(r => r.json()).then(h => Array.isArray(h) ? h : []),
-            fetch('/api/sections').then(r => r.json()),
-            fetch('/api/auth/me').then(r => r.json()),
-            fetch('/api/buying').then(r => r.json())
-        ]).then(([dailyParams, habitsData, sectionsData, userData, buyingData]) => {
-            setData(dailyParams);
-            setHabits(habitsData);
-            setSections(Array.isArray(sectionsData) ? sectionsData : []);
-            if (!userData.error) setUser(userData);
-            if (Array.isArray(buyingData)) setBuyingList(buyingData);
-            setLoading(false);
-        }).catch(e => {
-            console.error(e);
-            setLoading(false);
-        });
+        fetch(`/api/dashboard?date=${date}`)
+            .then(r => r.json())
+            .then(res => {
+                if (res.error) throw new Error(res.error);
+
+                setData(res.dailyParams);
+                setHabits(res.habits);
+                setSections(res.sections);
+                if (res.user) setUser(res.user);
+                setBuyingList(res.buyingList);
+                setBuyCategories(res.buyCategories);
+
+                setLoading(false);
+            })
+            .catch(e => {
+                console.error("Fetch error:", e);
+                setLoading(false);
+                toast.error("Fast-load failed. Retrying...");
+            });
     }, [date]);
 
     const fetchBuyingList = useCallback(async () => {
