@@ -24,8 +24,10 @@ export async function GET(request: Request) {
         const history = historyRes.rows as any[];
 
         const calcStreak = (field: string) => {
-            const todayStr = new Date().toISOString().split('T')[0];
-            const yesterdayDate = new Date(); yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+            const todayStr = date;
+            const refDate = new Date(date);
+            const yesterdayDate = new Date(refDate);
+            yesterdayDate.setDate(yesterdayDate.getDate() - 1);
             const yesterdayStr = yesterdayDate.toISOString().split('T')[0];
 
             let streakStart = -1;
@@ -43,12 +45,17 @@ export async function GET(request: Request) {
             if (streakStart === -1) return 0;
 
             let streak = 1;
-            let lastDate = new Date(history[streakStart].date);
+            const getDayDiff = (d1Str: string, d2Str: string) => {
+                const date1 = new Date(d1Str);
+                const date2 = new Date(d2Str);
+                return Math.round((date1.getTime() - date2.getTime()) / (1000 * 3600 * 24));
+            };
+
+            let lastDate = String(history[streakStart].date);
             for (let i = streakStart + 1; i < history.length; i++) {
                 if (history[i][field]) {
-                    const currDate = new Date(history[i].date);
-                    const diff = (lastDate.getTime() - currDate.getTime()) / (1000 * 3600 * 24);
-                    if (diff >= 0.9 && diff <= 1.1) {
+                    const currDate = String(history[i].date);
+                    if (getDayDiff(lastDate, currDate) === 1) {
                         streak++;
                         lastDate = currDate;
                     } else break;

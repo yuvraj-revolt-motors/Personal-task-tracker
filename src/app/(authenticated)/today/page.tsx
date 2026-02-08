@@ -40,7 +40,9 @@ export default function TodayPage() {
     // UI States
     const [saving, setSaving] = useState(false);
     const [activeNote, setActiveNote] = useState<string | null>(null); // For habit card notes
-    const [addingType, setAddingType] = useState<null | 'task' | 'gym_info' | 'profile' | 'habit' | 'edit_buy' | 'buy_category' | 'task_category'>(null);
+    const [addingType, setAddingType] = useState<null | 'task' | 'gym_info' | 'profile' | 'habit' | 'edit_buy' | 'buy_category' | 'task_category' | 'finance'>(null);
+    const [finances, setFinances] = useState<any[]>([]);
+    const [editingFinance, setEditingFinance] = useState<any>(null);
     const [buyingList, setBuyingList] = useState<any[]>([]);
     const [newBuyItem, setNewBuyItem] = useState('');
     const [newBuyCategory, setNewBuyCategory] = useState('General');
@@ -111,6 +113,7 @@ export default function TodayPage() {
                 if (res.user) setUser(res.user);
                 setBuyingList(res.buyingList);
                 setBuyCategories(res.buyCategories);
+                setFinances(res.finances || []);
 
                 setLoading(false);
             })
@@ -168,6 +171,42 @@ export default function TodayPage() {
             toast.error('Failed to delete item');
         }
     }, [buyingList]);
+
+    const fetchFinances = useCallback(async () => {
+        const r = await fetch('/api/finances');
+        const data = await r.json();
+        if (Array.isArray(data)) setFinances(data);
+    }, []);
+
+    const toggleFinancePaid = async (finance: any) => {
+        const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+        const isPaid = finance.last_paid_month === currentMonth;
+
+        const newMonth = isPaid ? null : currentMonth;
+        let newPaidMonths = finance.paid_months;
+        if (finance.type === 'emi') {
+            newPaidMonths = isPaid ? Math.max(0, finance.paid_months - 1) : finance.paid_months + 1;
+        }
+
+        // Optimistic
+        setFinances(prev => prev.map(f => f.id === finance.id ? { ...f, last_paid_month: newMonth, paid_months: newPaidMonths } : f));
+
+        try {
+            const res = await fetch('/api/finances', {
+                method: 'PATCH',
+                body: JSON.stringify({
+                    id: finance.id,
+                    last_paid_month: newMonth,
+                    paid_months: newPaidMonths
+                })
+            });
+            if (!res.ok) throw new Error();
+            toast.success(isPaid ? 'Payment unmarked' : 'Payment marked as done!');
+        } catch (err) {
+            fetchFinances();
+            toast.error('Failed to update finance');
+        }
+    };
 
     useEffect(() => {
         fetchData();
@@ -497,7 +536,7 @@ export default function TodayPage() {
                         {processedCategories.map((cat: string) => {
                             const catTasks = pendingTasks.filter((t: any) => (t.section_title || 'Misc') === cat || (cat === 'Misc' && !t.section_title));
                             return (
-                                <div key={cat} className="bg-gray-50 dark:bg-gray-900 rounded-2xl p-4 border border-gray-100 dark:border-gray-800 relative group/section">
+                                <div key={cat} data-section={cat} className="bg-gray-50 dark:bg-gray-900 rounded-2xl p-4 border border-gray-100 dark:border-gray-800 relative group/section min-h-[100px] transition-colors hover:bg-gray-100 dark:hover:bg-gray-800/50">
                                     <div className="flex justify-between items-center mb-3">
                                         <h3 className="text-sm font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">{cat}</h3>
                                         {cat !== 'Misc' && (
@@ -531,7 +570,25 @@ export default function TodayPage() {
                                     <div className="space-y-2">
                                         {catTasks.length === 0 && <div className="text-xs text-gray-300 font-medium py-2">No tasks</div>}
                                         {catTasks.map((t: any) => (
-                                            <TaskCard key={t.id} task={t} onToggle={(id: any, c: any) => handleTaskAction('PATCH', { id, completed: c, date: date })} onClick={() => setActiveTaskDetails(t)} />
+                                            <TaskCard
+                                                key={t.id}
+                                                task={t}
+                                                onToggle={(id: any, c: any) => handleTaskAction('PATCH', { id, completed: c, date: date })}
+                                                onMove={async (id: any, newCat: string, newPriority?: number) => {
+                                                    const section = sections.find(s => s.title === newCat);
+                                                    const body: any = { id, section_id: section?.id || null };
+                                                    if (newPriority !== undefined) body.priority = newPriority;
+                                                    await handleTaskAction('PATCH', body);
+                                                    if (newPriority !== undefined) {
+                                                        const pLabels = ['LOW', 'MED', 'HIGH'];
+                                                        toast.success(`Priority set to ${pLabels[newPriority]}`);
+                                                    } else {
+                                                        toast.success(`Moved to ${newCat}`);
+                                                    }
+                                                }}
+                                                onClick={() => setActiveTaskDetails(t)}
+                                                onDelete={() => handleDeleteTask(t.id)}
+                                            />
                                         ))}
                                     </div>
                                 </div>
@@ -554,7 +611,7 @@ export default function TodayPage() {
                                         <div className="space-y-2">
                                             {catDoneTasks.map((t: any) => (
                                                 <div key={t.id} className="opacity-60 hover:opacity-100 transition-opacity">
-                                                    <TaskCard task={t} onToggle={(id: any, c: any) => handleTaskAction('PATCH', { id, completed: c, date: date })} compact onClick={() => setActiveTaskDetails(t)} />
+                                                    <TaskCard task={t} onToggle={(id: any, c: any) => handleTaskAction('PATCH', { id, completed: c, date: date })} compact onClick={() => setActiveTaskDetails(t)} onDelete={() => handleDeleteTask(t.id)} />
                                                 </div>
                                             ))}
                                         </div>
@@ -770,8 +827,180 @@ export default function TodayPage() {
                 </div >
             </div >
 
+            {/* FINANCE TRACKER */}
+            <div className="mt-12 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-[2rem] p-8 relative shadow-sm">
+                <div className="flex justify-between items-center mb-6">
+                    <h2 className={cn("text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-3", outfit.className)}>
+                        <span className="bg-green-100 text-green-700 w-10 h-10 rounded-xl flex items-center justify-center text-xl">💰</span>
+                        Finance Tracker
+                    </h2>
+                    <button onClick={() => { setEditingFinance({ title: '', amount: 0, type: 'payment', total_months: 0, paid_months: 0, note: '' }); setAddingType('finance'); }} className="bg-black dark:bg-white text-white dark:text-black px-4 py-2 rounded-xl text-xs font-bold shadow-lg hover:bg-gray-800 dark:hover:bg-gray-200 transition-all">+ Add Monthly Spend</button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {finances.length === 0 && <div className="col-span-full py-12 text-center text-gray-300 italic">No finances tracked yet. Add your EMIs or monthly bills!</div>}
+                    {finances.map(f => {
+                        const currentMonth = new Date().toISOString().slice(0, 7);
+                        const isPaid = f.last_paid_month === currentMonth;
+                        return (
+                            <div key={f.id} className={cn("group relative bg-gray-50 dark:bg-gray-800/50 rounded-2xl p-6 border transition-all", isPaid ? "border-green-200 dark:border-green-900/30 bg-green-50/30" : "border-gray-100 dark:border-gray-800 hover:border-gray-300")}>
+                                <div className="flex justify-between items-start mb-4">
+                                    <div>
+                                        <h3 className="font-bold text-gray-900 dark:text-white uppercase text-xs tracking-widest">{f.title}</h3>
+                                        <p className="text-2xl font-black mt-1 text-gray-900 dark:text-white">₹{f.amount.toLocaleString()}</p>
+                                    </div>
+                                    <div className={cn("px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-tighter", f.type === 'emi' ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700")}>
+                                        {f.type}
+                                    </div>
+                                </div>
+
+                                {f.type === 'emi' && (
+                                    <div className="mb-4">
+                                        <div className="flex justify-between text-[10px] font-bold text-gray-400 uppercase mb-1">
+                                            <span>Progress</span>
+                                            <span>{f.paid_months} / {f.total_months} months</span>
+                                        </div>
+                                        <div className="h-1.5 w-full bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                                            <div
+                                                className="h-full bg-purple-500 transition-all duration-500"
+                                                style={{ width: `${Math.min(100, (f.paid_months / f.total_months) * 100)}%` }}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+
+                                {f.note && <p className="text-xs text-gray-500 dark:text-gray-400 italic mb-4 line-clamp-2">"{f.note}"</p>}
+
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={() => toggleFinancePaid(f)}
+                                        className={cn(
+                                            "flex-1 py-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2",
+                                            isPaid
+                                                ? "bg-green-500 text-white shadow-lg shadow-green-200"
+                                                : "bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border border-gray-100 dark:border-gray-600 hover:bg-gray-50"
+                                        )}
+                                    >
+                                        {isPaid ? "✓ Paid this Month" : "Mark as Paid"}
+                                    </button>
+                                    <button
+                                        onClick={() => { setEditingFinance(f); setAddingType('finance'); }}
+                                        className="w-12 h-12 bg-white dark:bg-gray-700 border border-gray-100 dark:border-gray-600 rounded-xl flex items-center justify-center text-gray-400 hover:text-black dark:hover:text-white transition-colors"
+                                    >
+                                        ✎
+                                    </button>
+                                    <button
+                                        onClick={() => openConfirm('Delete Finance', `Delete ${f.title}?`, async () => {
+                                            await fetch('/api/finances', { method: 'DELETE', body: JSON.stringify({ id: f.id }) });
+                                            fetchFinances();
+                                            toast.success('Deleted');
+                                        })}
+                                        className="w-12 h-12 bg-white dark:bg-gray-700 border border-gray-100 dark:border-gray-600 rounded-xl flex items-center justify-center text-gray-400 hover:text-red-500 transition-colors"
+                                    >
+                                        🗑️
+                                    </button>
+                                </div>
+                            </div>
+                        )
+                    })}
+                </div>
+            </div>
+
             {/* MODALS */}
             <AnimatePresence>
+                {/* FINANCE MODAL */}
+                {
+                    addingType === 'finance' && editingFinance && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/40 backdrop-blur-sm" onClick={() => setAddingType(null)}>
+                            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white dark:bg-gray-900 rounded-[2rem] p-8 w-full max-w-md shadow-2xl border dark:border-gray-800" onClick={e => e.stopPropagation()}>
+                                <h3 className="text-2xl font-bold mb-6 dark:text-white">{editingFinance.id ? 'Edit Spend' : 'Add Monthly Spend'}</h3>
+                                <div className="space-y-4">
+                                    <input
+                                        className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl p-4 text-sm font-bold placeholder:text-gray-300 dark:text-white focus:outline-none focus:ring-2 ring-black/5"
+                                        placeholder="Title (e.g. Car EMI, CC Bill)"
+                                        value={editingFinance.title}
+                                        onChange={e => setEditingFinance({ ...editingFinance, title: e.target.value })}
+                                    />
+                                    <div className="flex gap-4">
+                                        <div className="flex-1">
+                                            <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 block">Amount</label>
+                                            <input
+                                                type="number"
+                                                className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl p-4 text-sm font-bold dark:text-white focus:outline-none focus:ring-2 ring-black/5"
+                                                value={editingFinance.amount}
+                                                onChange={e => setEditingFinance({ ...editingFinance, amount: parseFloat(e.target.value) || 0 })}
+                                            />
+                                        </div>
+                                        <div className="flex-1">
+                                            <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 block">Type</label>
+                                            <select
+                                                className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl p-4 text-sm font-bold dark:text-white focus:outline-none focus:ring-2 ring-black/5 appearance-none px-4"
+                                                value={editingFinance.type}
+                                                onChange={e => setEditingFinance({ ...editingFinance, type: e.target.value })}
+                                            >
+                                                <option value="payment">Regular Bill</option>
+                                                <option value="emi">EMI</option>
+                                                <option value="card">Credit Card</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    {editingFinance.type === 'emi' && (
+                                        <div className="flex gap-4">
+                                            <div className="flex-1">
+                                                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 block">Paid Months</label>
+                                                <input
+                                                    type="number"
+                                                    className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl p-4 text-sm font-bold dark:text-white focus:outline-none focus:ring-2 ring-black/5"
+                                                    value={editingFinance.paid_months}
+                                                    onChange={e => setEditingFinance({ ...editingFinance, paid_months: parseInt(e.target.value) || 0 })}
+                                                />
+                                            </div>
+                                            <div className="flex-1">
+                                                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 block">Total Months</label>
+                                                <input
+                                                    type="number"
+                                                    className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl p-4 text-sm font-bold dark:text-white focus:outline-none focus:ring-2 ring-black/5"
+                                                    value={editingFinance.total_months}
+                                                    onChange={e => setEditingFinance({ ...editingFinance, total_months: parseInt(e.target.value) || 0 })}
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <textarea
+                                        className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl p-4 text-sm font-medium h-24 focus:outline-none focus:ring-2 ring-black/5 resize-none dark:text-white"
+                                        placeholder="Note / Reason for this spend..."
+                                        value={editingFinance.note}
+                                        onChange={e => setEditingFinance({ ...editingFinance, note: e.target.value })}
+                                    />
+
+                                    <div className="flex gap-4 pt-4">
+                                        <button onClick={() => setAddingType(null)} className="flex-1 bg-gray-100 dark:bg-gray-800 text-gray-500 font-bold py-4 rounded-xl hover:bg-gray-200 transition-colors">Cancel</button>
+                                        <button
+                                            onClick={async () => {
+                                                const method = editingFinance.id ? 'PATCH' : 'POST';
+                                                const res = await fetch('/api/finances', {
+                                                    method,
+                                                    body: JSON.stringify(editingFinance)
+                                                });
+                                                if (res.ok) {
+                                                    fetchFinances();
+                                                    setAddingType(null);
+                                                    toast.success(editingFinance.id ? 'Updated' : 'Added');
+                                                }
+                                            }}
+                                            disabled={!editingFinance.title}
+                                            className="flex-1 bg-black dark:bg-white text-white dark:text-black font-bold py-4 rounded-xl hover:opacity-90 transition-opacity disabled:opacity-30"
+                                        >
+                                            {editingFinance.id ? 'Save Changes' : 'Add Spend'}
+                                        </button>
+                                    </div>
+                                </div>
+                            </motion.div>
+                        </div>
+                    )
+                }
                 {/* BUY CATEGORY FORM MODAL */}
                 {
                     addingType === 'buy_category' && (
@@ -954,6 +1183,53 @@ export default function TodayPage() {
                                 </div>
 
                                 <div className="mb-6">
+                                    <label className="text-xs font-bold text-gray-400 uppercase mb-2 block">Priority</label>
+                                    <div className="flex gap-2">
+                                        {[0, 1, 2].map((p) => {
+                                            const label = PRIORITY_LABELS[p as 0 | 1 | 2];
+                                            const isSelected = activeTaskDetails.priority === p;
+                                            const colors = p === 2 ? "bg-red-500 text-white" : p === 1 ? "bg-orange-500 text-white" : "bg-blue-500 text-white";
+                                            return (
+                                                <button
+                                                    key={p}
+                                                    onClick={() => setActiveTaskDetails({ ...activeTaskDetails, priority: p })}
+                                                    className={cn(
+                                                        "flex-1 py-2 rounded-xl text-[10px] font-black tracking-widest uppercase border transition-all",
+                                                        isSelected ? colors + " border-transparent shadow-lg scale-105" : "bg-gray-50 text-gray-400 border-gray-100"
+                                                    )}
+                                                >
+                                                    {label}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+
+                                <div className="mb-6">
+                                    <label className="text-xs font-bold text-gray-400 uppercase mb-2 block">Category</label>
+                                    <div className="flex flex-wrap gap-2">
+                                        {processedCategories.map(catTitle => {
+                                            const section = sections.find(s => s.title === catTitle);
+                                            const isSelected = (activeTaskDetails.section_title || 'Misc') === catTitle;
+                                            return (
+                                                <button
+                                                    key={catTitle}
+                                                    onClick={() => setActiveTaskDetails({ ...activeTaskDetails, section_id: section?.id || null, section_title: catTitle })}
+                                                    className={cn(
+                                                        "px-3 py-1.5 rounded-xl text-[10px] font-black tracking-widest uppercase border transition-all",
+                                                        isSelected
+                                                            ? "bg-black text-white border-black shadow-lg scale-105"
+                                                            : "bg-gray-50 text-gray-400 border-gray-100 hover:border-gray-200"
+                                                    )}
+                                                >
+                                                    {catTitle}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+
+                                <div className="mb-6">
                                     <label className="text-xs font-bold text-gray-400 uppercase mb-2 block">Note</label>
                                     <textarea
                                         className="w-full bg-gray-50 border border-gray-100 rounded-xl p-4 text-sm min-h-[120px] resize-none focus:outline-none focus:ring-2 ring-black/5 text-gray-700 font-medium"
@@ -967,7 +1243,7 @@ export default function TodayPage() {
                                     <button onClick={() => { handleDeleteTask(activeTaskDetails.id); setActiveTaskDetails(null); }} className="text-red-500 font-bold text-sm px-4 py-2 hover:bg-red-50 rounded-lg transition-colors flex items-center gap-2">
                                         <span>🗑️</span> Delete Task
                                     </button>
-                                    <button onClick={() => { handleTaskAction('PATCH', { id: activeTaskDetails.id, note: activeTaskDetails.note }); setActiveTaskDetails(null); }} className="bg-black text-white font-bold px-8 py-3 rounded-xl text-sm hover:bg-gray-800 transition-colors shadow-lg">
+                                    <button onClick={() => { handleTaskAction('PATCH', { id: activeTaskDetails.id, note: activeTaskDetails.note, section_id: activeTaskDetails.section_id, priority: activeTaskDetails.priority }); setActiveTaskDetails(null); }} className="bg-black text-white font-bold px-8 py-3 rounded-xl text-sm hover:bg-gray-800 transition-colors shadow-lg">
                                         Save Details
                                     </button>
                                 </div>
@@ -1145,10 +1421,46 @@ function SideCard({ habit, onClick, onToggle }: any) {
     );
 }
 
-const TaskCard = React.memo(function TaskCard({ task, onToggle, onClick, onDelete, compact }: any) {
+const TaskCard = React.memo(function TaskCard({ task, onToggle, onClick, onDelete, onMove, compact }: any) {
     const priorityColor = task.completed ? 'bg-gray-200 dark:bg-gray-700' : (PRIORITY_LABELS[task.priority as 0 | 1 | 2] === 'HIGH' ? 'bg-red-500' : PRIORITY_LABELS[task.priority as 0 | 1 | 2] === 'MED' ? 'bg-orange-500' : 'bg-blue-500');
+
     return (
-        <div onClick={onClick} className={cn("bg-white dark:bg-gray-800 p-3 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm hover:shadow-md transition-all cursor-pointer flex items-center gap-3 group", compact && "py-2 bg-transparent border-none shadow-none hover:bg-gray-50 dark:hover:bg-gray-800")}>
+        <motion.div
+            layout
+            drag={!compact && !!onMove}
+            dragSnapToOrigin
+            dragElastic={0.1}
+            whileDrag={{ scale: 1.05, zIndex: 50, boxShadow: "0 20px 25px -5px rgb(0 0 0 / 0.1)", pointerEvents: 'none' }}
+            onDragEnd={(e: any, info: any) => {
+                if (!onMove) return;
+                const element = document.elementFromPoint(info.point.x, info.point.y);
+                const dropZone = element?.closest('[data-section]');
+                if (dropZone) {
+                    const newCat = dropZone.getAttribute('data-section');
+                    const rect = dropZone.getBoundingClientRect();
+                    const relativeY = info.point.y - rect.top;
+                    const percentY = relativeY / rect.height;
+
+                    let newPriority = 0;
+                    if (percentY < 0.33) newPriority = 2; // HIGH
+                    else if (percentY < 0.66) newPriority = 1; // MED
+                    else newPriority = 0; // LOW
+
+                    const isSameCat = newCat === (task.section_title || 'Misc');
+                    if (!isSameCat || newPriority !== task.priority) {
+                        onMove(task.id, newCat || 'Misc', newPriority);
+                    }
+                }
+            }}
+            onClick={onClick}
+            className={cn(
+                "bg-white dark:bg-gray-800 p-3 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm hover:shadow-md transition-all cursor-grab active:cursor-grabbing flex items-center gap-3 group touch-none",
+                compact && "py-2 bg-transparent border-none shadow-none hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
+            )}
+        >
+            {!compact && onMove && (
+                <div className="text-[10px] text-gray-300 group-hover:text-gray-400 transition-colors">⠿</div>
+            )}
             <button onClick={(e) => { e.stopPropagation(); onToggle(task.id, !task.completed); }} className={cn("w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors", task.completed ? "bg-black dark:bg-gray-600 border-black dark:border-gray-600" : "border-gray-200 dark:border-gray-600 hover:border-gray-400")}>
                 {task.completed && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3"><path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" /></svg>}
             </button>
@@ -1160,10 +1472,16 @@ const TaskCard = React.memo(function TaskCard({ task, onToggle, onClick, onDelet
                 {!compact && task.note && <p className="text-xs text-gray-400 dark:text-gray-500 truncate pl-3.5">{task.note}</p>}
             </div>
             {!!task.estimated_time && !task.completed && <div className="text-[10px] font-bold text-gray-400 dark:text-gray-400 bg-gray-50 dark:bg-gray-700 px-1.5 py-0.5 rounded border border-gray-100 dark:border-gray-600">{task.estimated_time}m</div>}
-            {!compact && onDelete && (
-                <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="text-gray-200 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity px-2">🗑️</button>
+            {onDelete && (
+                <button
+                    onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                    className="text-gray-300 hover:text-red-500 transition-colors px-2 relative z-10"
+                    title="Delete Task"
+                >
+                    🗑️
+                </button>
             )}
-        </div>
+        </motion.div>
     );
 });
 

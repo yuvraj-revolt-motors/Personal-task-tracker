@@ -106,6 +106,18 @@ async function initDb() {
             name TEXT NOT NULL,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(user_id, name)
+        )`,
+      `CREATE TABLE IF NOT EXISTS finances (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            title TEXT NOT NULL,
+            amount REAL DEFAULT 0,
+            type TEXT DEFAULT 'payment',
+            total_months INTEGER DEFAULT 0,
+            paid_months INTEGER DEFAULT 0,
+            note TEXT,
+            last_paid_month TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )`
     ];
 
@@ -157,7 +169,7 @@ async function initDb() {
     const firstUser = await client.execute('SELECT id FROM users ORDER BY id ASC LIMIT 1');
     if (firstUser.rows.length > 0) {
       const uid = firstUser.rows[0].id;
-      const tablesToUpdate = ['sections', 'memory_rules', 'habits', 'habit_logs', 'daily_logs', 'tasks', 'workout_schedule', 'buying_list', 'buying_categories'];
+      const tablesToUpdate = ['sections', 'memory_rules', 'habits', 'habit_logs', 'daily_logs', 'tasks', 'workout_schedule', 'buying_list', 'buying_categories', 'finances'];
       for (const table of tablesToUpdate) {
         try {
           await client.execute({
